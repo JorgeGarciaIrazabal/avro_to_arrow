@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fs::File, sync::Arc};
-use arrow_array::RecordBatch;
+use arrow_array::{ArrayRef, Int32Array, Int64Array, BooleanArray, Float64Array, StringArray,  RecordBatch};
 use avro_rs::Reader;
+use avro_schema::read::fallible_streaming_iterator::empty;
 use serde_json::Value;
 use arrow_schema::{DataType, Field, Schema as ArrowSchema};
 
@@ -51,18 +52,65 @@ fn avro_schema_to_arrow_schema(avro_schema: &Value) -> ArrowSchema {
     
 }
 
-fn create_arrow_record_batch() -> RecordBatch {
-    let avro_path = "tests/static/data.avro";
+
+fn avro_to_columnar(rows: usize, avro_path: &str, columns: &Vec<Vec<i64>>) {
+    let f = File::open(avro_path).unwrap();
+    let reader = Reader::new(f).unwrap();
+    for value in reader.take(rows) {
+        let v = value.unwrap();
+        if let avro_rs::types::Value::Record(record) = v {
+            for (pos, (k, v)) in record.iter().enumerate() {
+                let value = match v {
+                    avro_rs::types::Value::Int(i) => *i as i64, // Convert i32 to i64
+                    _ => panic!("Unsupported data type"),
+                };
+                columns[pos].push(value);
+            }
+        }
+    }
+}
+
+
+
+fn create_arrow_record_batch(avro_path: &str) -> RecordBatch {
     let avro_schema = get_avro_schema_json(avro_path);
     let arrow_schema = avro_schema_to_arrow_schema(&avro_schema);
-    // let columns = HashMap<String, Vec<Value>>::new();
+    let mut columns: Vec<Vec<i64>> = Vec::new();
 
-    // let batch = RecordBatch::try_new(
-    //     Arc::new(arrow_schema),
-    //     vec![Arc::new(id_array)]
-    // ).unwrap();
-    // println!("{:?}", arrow_schema);
-    // batch
+
+    for field in arrow_schema.fields() {
+        let data_type = field.data_type();
+        let array = match data_type {
+            DataType::Int64 => {
+                let array:Vec<i64> = Vec::new();
+                array
+            },
+            DataType::Float64 => {
+                let array:Vec<f32> = Vec::new();
+                array
+            },
+            DataType::Boolean => {
+                let array:Vec<bool> = Vec::new();
+                array
+            },
+            DataType::Utf8 => {
+                let array:Vec<&str> = Vec::new();
+                array
+            },
+            DataType::Int32 => {
+                let array:Vec<i32> = Vec::new();
+                array
+            },
+            _ => panic!("Unsupported data type"),
+        };
+        columns.push(array);
+    }
+
+    let batch = RecordBatch::try_new(
+        Arc::new(arrow_schema),
+        columns,
+    ).unwrap();
+    batch
 }
 
 
