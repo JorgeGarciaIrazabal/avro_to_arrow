@@ -1,0 +1,30 @@
+[package]
+name = "avro_to_arrow"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "avro_to_arrow"
+
+crate-type = ["cdylib"]
+
+[dependencies]
+avro-rs = "0.13.0"
+avro-schema = "0.3.0"
+futures = "0.3.30"
+arrow = { version = "50.0.0" }
+arrow-array = { version = "50.0.0" }
+arrow-buffer = { version = "50.0.0" }
+arrow-data = { version = "50.0.0" }
+arrow-schema = { version = "50.0.0" }
+pyo3 = { version = "0.20", features = ["extension-module", "abi3-py38"] }
+serde_json = "1.0.114"
+
+
+[build-dependencies]
+pyo3-build-config = { version = "0.20.3", features = [
+    "extension-module",
+    "abi3-py38",
+] }
