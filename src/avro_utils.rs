@@ -1,9 +1,16 @@
 use std::{collections::HashMap, fs::File, sync::Arc};
-use arrow_array::{ArrayRef, Int32Array, Int64Array, BooleanArray, Float64Array, StringArray,  RecordBatch};
-use avro_rs::Reader;
-use avro_schema::read::fallible_streaming_iterator::empty;
-use serde_json::Value;
+
+
+use arrow_array::{ArrayRef, BooleanArray, Float64Array, Int64Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema as ArrowSchema};
+use avro_rs::Reader;
+use serde_json::Value;
+
+enum AnyTypes {
+    Int64(i64),
+    Boolean(bool),
+    Float64(f64),
+}
 
 
 fn get_avro_schema_json(avro_path: &str) -> Value {
@@ -53,63 +60,94 @@ fn avro_schema_to_arrow_schema(avro_schema: &Value) -> ArrowSchema {
 }
 
 
-fn avro_to_columnar(rows: usize, avro_path: &str, columns: &Vec<Vec<i64>>) {
+fn avro_to_columnar(rows: usize, avro_path: &str) -> HashMap<String, Vec<AnyTypes>>  {
     let f = File::open(avro_path).unwrap();
     let reader = Reader::new(f).unwrap();
+    let mut new_columns: HashMap<String, Vec<AnyTypes>> = HashMap::new();
+    // new_columns.insert("column1", Vec::new());
+    // new_columns.insert("column3", Vec::new());
+    // new_columns.insert("column4", Vec::new());
+
     for value in reader.take(rows) {
         let v = value.unwrap();
         if let avro_rs::types::Value::Record(record) = v {
-            for (pos, (k, v)) in record.iter().enumerate() {
-                let value = match v {
-                    avro_rs::types::Value::Int(i) => *i as i64, // Convert i32 to i64
+            for (key, v) in record.iter() {
+                let k = key.to_string(); // Clone the key
+                match v {
+                    avro_rs::types::Value::Long(i) => {
+                        // new_columns[k.as_str()].push(AnyTypes::Int64(*i));
+                    },
+                    avro_rs::types::Value::Boolean(i) => {
+                        // new_columns[k.as_str()].push(AnyTypes::Boolean(*i));
+                    },
+                    avro_rs::types::Value::Float(i) => {
+                        // new_columns[k.as_str()].push(AnyTypes::Float64(*i as f64));
+                    },
+                    avro_rs::types::Value::Union(u) => {
+                        match &**u {
+                            avro_rs::types::Value::Null => {
+                                // Handle Null case
+                            },
+                            avro_rs::types::Value::Long(i) => {
+                                new_columns.entry(k).or_insert_with(Vec::new).push(AnyTypes::Int64(*i as i64));
+                            },
+                            avro_rs::types::Value::Boolean(i) => {
+                                new_columns.entry(k).or_insert_with(Vec::new).push(AnyTypes::Boolean(*i));
+                            },
+                            avro_rs::types::Value::Double(i) => {
+                                new_columns.entry(k).or_insert_with(Vec::new).push(AnyTypes::Float64(*i as f64));
+                            },
+                            // Handle other cases
+                            _ => panic!("Unsupported data type"),
+                        }
+                    },
+                    // Handle other types as needed
                     _ => panic!("Unsupported data type"),
-                };
-                columns[pos].push(value);
+                }
             }
         }
     }
+    new_columns
 }
-
-
 
 fn create_arrow_record_batch(avro_path: &str) -> RecordBatch {
     let avro_schema = get_avro_schema_json(avro_path);
     let arrow_schema = avro_schema_to_arrow_schema(&avro_schema);
-    let mut columns: Vec<Vec<i64>> = Vec::new();
+    println!("{:#?}", arrow_schema);
 
+    let records = avro_to_columnar(10, avro_path);
+    let mut arrays: Vec<ArrayRef> = Vec::new();
 
     for field in arrow_schema.fields() {
-        let data_type = field.data_type();
-        let array = match data_type {
-            DataType::Int64 => {
-                let array:Vec<i64> = Vec::new();
-                array
+        let column = records.get(field.name()).unwrap();
+        let array: ArrayRef = match &column[0] {
+            AnyTypes::Int64(_) => {
+                let int_vec: Vec<i64> = column.into_iter().map(|x| match x {
+                    AnyTypes::Int64(i) => *i,
+                    _ => panic!("Mismatched types in column"),
+                }).collect();
+                Arc::new(Int64Array::from(int_vec)) as ArrayRef
             },
-            DataType::Float64 => {
-                let array:Vec<f32> = Vec::new();
-                array
+            AnyTypes::Float64(_) => {
+                let float_vec: Vec<f64> = column.into_iter().map(|x| match x {
+                    AnyTypes::Float64(f) => *f,
+                    _ => panic!("Mismatched types in column"),
+                }).collect();
+                Arc::new(Float64Array::from(float_vec)) as ArrayRef
             },
-            DataType::Boolean => {
-                let array:Vec<bool> = Vec::new();
-                array
+            AnyTypes::Boolean(_) => {
+                let bool_vec: Vec<bool> = column.into_iter().map(|x| match x {
+                    AnyTypes::Boolean(b) => *b,
+                    _ => panic!("Mismatched types in column"),
+                }).collect();
+                Arc::new(BooleanArray::from(bool_vec)) as ArrayRef
             },
-            DataType::Utf8 => {
-                let array:Vec<&str> = Vec::new();
-                array
-            },
-            DataType::Int32 => {
-                let array:Vec<i32> = Vec::new();
-                array
-            },
-            _ => panic!("Unsupported data type"),
+            // Handle other types as needed
         };
-        columns.push(array);
+        arrays.push(array);
     }
 
-    let batch = RecordBatch::try_new(
-        Arc::new(arrow_schema),
-        columns,
-    ).unwrap();
+    let batch = RecordBatch::try_new(Arc::new(arrow_schema), arrays).unwrap();
     batch
 }
 
@@ -117,7 +155,7 @@ fn create_arrow_record_batch(avro_path: &str) -> RecordBatch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_get_avro_schema() {
         let avro_path = "tests/static/data.avro";
@@ -169,5 +207,13 @@ mod tests {
         ]);
 
         assert_eq!(expected_arrow_schema, arrow_schema);
+    }
+
+    #[test]
+    fn test_create_record_batch_generates_10_rows() {
+        let avro_path = "tests/static/data.avro";
+        let batch = create_arrow_record_batch(avro_path);
+        println!("{:#?}", batch);
+        assert_eq!(10, batch.num_rows());
     }
 }
