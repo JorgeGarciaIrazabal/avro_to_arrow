@@ -1,9 +1,10 @@
+use std::fs::File;
 use arrow_array::{Int32Array};
 use arrow::{pyarrow::PyArrowType, record_batch::RecordBatch};
 use arrow_schema::{DataType, Field, Schema as ArrowSchema};
 use std::sync::Arc;
 mod avro_utils;
-// mod build;
+use datafusion::datasource::avro_to_arrow::{Reader, ReaderBuilder};
 
 fn create_arrow_table() -> RecordBatch {
     let id_array = Int32Array::from(vec![1, 2, 3, 4, 5]);
@@ -33,14 +34,23 @@ fn create_arrow_table_py() -> PyResult<PyArrowType<RecordBatch>> {
 struct RecordBachIterator {
     file: String,
     // record_batches is a list of record batches
-    record_batches: Box<dyn Iterator<Item = RecordBatch> + Send>
+    record_batches: Box<dyn Iterator<Item = RecordBatch> + Send>,
+    //
+    // reader: Reader<'static, File>
 }
 
 impl RecordBachIterator {
-    // Constructs a new instance of [`Second`].
-    // Note this is an associated function - no self.
     pub fn new(file: String) -> Self {
-        Self { file, record_batches: Box::new(vec![create_arrow_table(), create_arrow_table()].into_iter()) }
+        let f = File::open(file.clone()).unwrap();
+        let builder = ReaderBuilder::new()
+          .read_schema()
+          .with_batch_size(1_000_000);
+        let reader = builder
+          .build::<File>(f)
+          .unwrap();
+
+        let record_batches = reader.into_iter().map(|result| result.unwrap());
+        Self { file: file.clone(), record_batches: Box::new(record_batches) }
     }
 }
 
@@ -80,7 +90,7 @@ impl ItemIterator {
 
 #[pyfunction]
 fn get_numbers() -> ItemIterator {
-    let i = RecordBachIterator::new("file".to_string());
+    let i = RecordBachIterator::new("/home/jorge/code/avro_to_arrow/tests/static/data.avro".to_string());
     ItemIterator { iter: Box::new(i) }
 }
 
