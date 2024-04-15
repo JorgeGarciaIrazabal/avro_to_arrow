@@ -14,3 +14,4 @@ Cargo.lock
 *.pdb
 .idea/
 big_avro.avro
+big_parquet.parquet

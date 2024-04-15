@@ -23,4 +23,5 @@ df = create_data()
 print("generated data")
 # Write the DataFrame to an Avro file
 pdx.to_avro('big_avro.avro', df)
-print("saved data")
+df.to_parquet('big_parquet.parquet')
+print("data_saved")

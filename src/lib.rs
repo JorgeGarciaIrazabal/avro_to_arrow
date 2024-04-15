@@ -1,50 +1,20 @@
 use std::fs::File;
-use arrow_array::{Int32Array};
+
 use arrow::{pyarrow::PyArrowType, record_batch::RecordBatch};
-use arrow_schema::{DataType, Field, Schema as ArrowSchema};
-use std::sync::Arc;
-mod avro_utils;
-use datafusion::datasource::avro_to_arrow::{Reader, ReaderBuilder};
-
-fn create_arrow_table() -> RecordBatch {
-    let id_array = Int32Array::from(vec![1, 2, 3, 4, 5]);
-    let schema = ArrowSchema::new(vec![
-        Field::new("id", DataType::Int32, false)
-    ]);
-
-    let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(id_array)]).unwrap();
-    batch
-}
-
+use datafusion::datasource::avro_to_arrow::ReaderBuilder;
 use pyo3::prelude::*;
-
-/// Formats the sum of two numbers as string.
-#[pyfunction]
-fn sum_as_string(a: usize, b: usize) -> PyResult<String> {
-    Ok((a + b).to_string())
-}
-
-#[pyfunction]
-fn create_arrow_table_py() -> PyResult<PyArrowType<RecordBatch>> {
-    let batch1 = create_arrow_table();
-    let batch2 = create_arrow_table();
-    Ok(PyArrowType(batch1))
-}
 
 struct RecordBachIterator {
     file: String,
-    // record_batches is a list of record batches
     record_batches: Box<dyn Iterator<Item = RecordBatch> + Send>,
-    //
-    // reader: Reader<'static, File>
 }
 
 impl RecordBachIterator {
-    pub fn new(file: String) -> Self {
+    pub fn new(file: String, bach_size: usize) -> Self {
         let f = File::open(file.clone()).unwrap();
         let builder = ReaderBuilder::new()
           .read_schema()
-          .with_batch_size(1_000_000);
+          .with_batch_size(bach_size);
         let reader = builder
           .build::<File>(f)
           .unwrap();
@@ -55,15 +25,10 @@ impl RecordBachIterator {
 }
 
 impl Iterator for RecordBachIterator {
-    // We can refer to this type using Self::Item
     type Item = PyArrowType<RecordBatch>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        println!("next");
-        let current = self.file.clone();
-
-        // Since there's no endpoint to a Fibonacci sequence, the `Iterator`
-        // will never return `None`, and `Some` is always returned.
+        let _current = self.file.clone();
         match self.record_batches.next() {
             Some(x) => Option::from(PyArrowType(x)),
             None => Option::from(None),
@@ -79,29 +44,22 @@ struct ItemIterator {
 #[pymethods]
 impl ItemIterator {
     fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        println!("__iter__");
         slf
     }
     fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<PyArrowType<RecordBatch>> {
-        println!("__next__");
         slf.iter.next()
     }
 }
 
 #[pyfunction]
-fn get_numbers() -> ItemIterator {
-    let i = RecordBachIterator::new("/home/jorge/code/avro_to_arrow/tests/static/data.avro".to_string());
+fn avro_to_arrow_batches(file_path: String, batch_size: usize) -> ItemIterator {
+    let i = RecordBachIterator::new(file_path, batch_size);
     ItemIterator { iter: Box::new(i) }
 }
 
 
-/// A Python module implemented in Rust. The name of this function must match
-/// the `lib.name` setting in the `Cargo.toml`, else Python will not be able to
-/// import the module.
 #[pymodule]
 fn avro_to_arrow(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
-    m.add_function(wrap_pyfunction!(create_arrow_table_py, m)?)?;
-    m.add_function(wrap_pyfunction!(get_numbers, m)?)?;
+    m.add_function(wrap_pyfunction!(avro_to_arrow_batches, m)?)?;
     Ok(())
 }

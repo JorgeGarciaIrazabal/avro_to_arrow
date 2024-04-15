@@ -28,3 +28,10 @@ pyo3-build-config = { version = "0.20.3", features = [
     "extension-module",
     "abi3-py38",
 ] }
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+debug = false
